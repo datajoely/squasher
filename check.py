@@ -7,38 +7,33 @@ import anyconfig
 
 
 def _get_next_n_days(n:int) -> Generator:
-    """_summary_
-
-    Args:
-        n (_type_): _description_
-
-    Returns:
-        _type_: _description_
-
-    Yields:
-        Generator: _description_
+    """This method will return a iterable of datetime
+    objects incremented by 1 until 'n' days from today
     """
     return map(lambda x: datetime.now() + timedelta(x), range(0, n))
 
 
-def _get_activity_times_json(
+def _get_single_availability(
     date_obj: datetime,
     venue_name: str,
     activity_name: str,
     base_url: str,
     headers: Dict[str, Any],
 ) -> requests.Response:
-    """_summary_
+    """This method retrieves the activity times from the better.org
+    API endpoint.
 
     Args:
-        date_obj (datetime): _description_
-        venue_name (str): _description_
-        activity_name (str): _description_
-        base_url (str): _description_
-        headers (Dict[str, Any]): _description_
+        date_obj (datetime): The day in question
+        venue_name (str): The venue in question
+        activity_name (str): The activity in question
+        base_url (str): The URL to format
+        headers (Dict[str, Any]): The required GET request headers
 
     Returns:
-        requests.Response: _description_
+        requests.Response: An object that contains the server response.
+            Successful responses will be code 200, Unsuccessful responses
+            will return 422
     """
     date_params = (("date", date_obj.strftime("%Y-%m-%d")),)
 
@@ -50,28 +45,29 @@ def _get_activity_times_json(
     return response
 
 
-def _get_court_availability(
+def _get_batch_availability(
     days: int,
     venue_name: str,
     activity_name: str,
     base_url: str,
     headers: Dict[str, Any],
-) -> Dict[str, requests.Response]:
-    """_summary_
+) -> List[requests.Response]:
+    """This method will query the better.org API for a
+    series of days retrieving the responses for all days 
+    from today to day 'n'
 
     Args:
-        days (int): _description_
-        venue_name (str): _description_
-        activity_name (str): _description_
-        base_url (str): _description_
-        headers (Dict[str, Any]): _description_
+        days (int): The number of days to query in this batch
+        venue_name (str): The venue in question
+        activity_name (str): The activity in question
+        base_url (str): The URL to format
+        headers (Dict[str, Any]): The required GET request headers
 
     Returns:
-        Dict[str, requests.Response]: _description_
+        List[requests.Response]: A list of responses
     """
     days_to_check = _get_next_n_days(days)
-    responses = {
-        day: _get_activity_times_json(
+    responses = [_get_single_availability(
             date_obj=day,
             venue_name=venue_name,
             activity_name=activity_name,
@@ -79,18 +75,21 @@ def _get_court_availability(
             headers=headers,
         )
         for day in days_to_check
-    }
-    return responses
+    ]
+    if responses:
+        return responses
+    raise IOError('Unable to retrieve any availability from the API')
 
 
 def _parse_json_payload(payload: Dict[str, Any]) -> List[Any]:
-    """_summary_
+    """The JSON payloads provided by the better API are different 
+    depending on the day this process makes them all consistent
 
     Args:
-        payload (Dict[str, Any]): _description_
+        payload (Dict[str, Any]): The dictionary object to process
 
     Returns:
-        List[Any]: _description_
+        List[Any]: The consistent list object for all payloads
     """
     data = payload["data"]
     if isinstance(data, dict):
@@ -101,17 +100,18 @@ def _parse_json_payload(payload: Dict[str, Any]) -> List[Any]:
     return working_payload
 
 
-def _process_json(responses: Dict[str, requests.Response]) -> List[Dict[str, Any]]:
-    """_summary_
+def _process_json(responses: List[requests.Response]) -> List[Dict[str, Any]]:
+    """This method processes the JSON payloads and returns a simple list 
+    of dictionaries that have been processed, filtered and transformed.
 
     Args:
-        responses (Dict[str, requests.Response]): _description_
+        responses (List[requests.Response]): The responses to filter and process
 
     Returns:
-        List[Dict[str, Any]]: _description_
+        List[Dict[str, Any]]: The processed dictionary objects 
     """
-    valid_json = {k: v.json() for k, v in responses.items() if v.status_code == 200}
-    flat_json = reduce(add, [_parse_json_payload(v) for k, v in valid_json.items()])
+    valid_json = [x.json() for x in responses if x.status_code == 200]
+    flat_json = reduce(add, [_parse_json_payload(x) for x in valid_json])
     columns = {
         "timestamp": datetime.fromtimestamp,
         "spaces": int,
@@ -128,6 +128,6 @@ def _process_json(responses: Dict[str, requests.Response]) -> List[Dict[str, Any
 if __name__ == "__main__":
     config = anyconfig.load('config.yaml')
     kwargs = config['search_params'] | config['better_api']
-    responses = _get_court_availability(**kwargs)
+    responses = _get_batch_availability(**kwargs)
     data = _process_json(responses=responses)
     
