@@ -1,0 +1,11 @@
+search_params:
+  days: 7
+  venue_name: oasis-sports-centre
+  activity_name: squash-court-40min
+
+better_api:
+  headers:
+      authority: better-admin.org.uk"
+      accept: application/json"
+      origin: https://bookings.better.org.uk
+  base_url: "https://better-admin.org.uk/api/activities/venue/{venue_name}/activity/{activity_name}/times"
